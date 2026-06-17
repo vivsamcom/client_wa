@@ -1,0 +1,134 @@
+x-app: &app
+  build: .
+  env_file:
+    - .env
+  restart: unless-stopped
+
+x-api: &api
+  <<: *app
+  command: node src/server.js
+  ports:
+    - "3000:3000"
+
+x-worker: &worker
+  <<: *app
+  command: node src/worker.js
+
+x-postgres-env: &postgres-env
+  DB_PROVIDER: postgres
+  DATABASE_URL: postgres://wa_user:wa_password@postgres:5432/wa_loan_demo
+
+x-mongo-env: &mongo-env
+  DB_PROVIDER: mongo
+  MONGODB_URI: mongodb://mongo:27017
+  MONGODB_DB: wa_loan_demo
+
+services:
+  api-postgres:
+    <<: *api
+    environment:
+      <<: *postgres-env
+    profiles:
+      - postgres
+    depends_on:
+      postgres-migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+  worker-postgres:
+    <<: *worker
+    environment:
+      <<: *postgres-env
+    profiles:
+      - postgres
+    depends_on:
+      postgres-migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+  api-mongo:
+    <<: *api
+    environment:
+      <<: *mongo-env
+    profiles:
+      - mongo
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker-mongo:
+    <<: *worker
+    environment:
+      <<: *mongo-env
+    profiles:
+      - mongo
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  postgres-migrate:
+    build: .
+    command: node scripts/migrate-postgres.js
+    env_file:
+      - .env
+    environment:
+      <<: *postgres-env
+    profiles:
+      - postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  postgres:
+    image: postgres:16-alpine
+    profiles:
+      - postgres
+    environment:
+      POSTGRES_USER: wa_user
+      POSTGRES_PASSWORD: wa_password
+      POSTGRES_DB: wa_loan_demo
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wa_user -d wa_loan_demo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo:
+    image: mongo:7
+    profiles:
+      - mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  mongo_data:
