@@ -3,73 +3,29 @@ x-app: &app
   env_file:
     - .env
   restart: unless-stopped
-
-x-api: &api
-  <<: *app
-  command: node src/server.js
-  ports:
-    - "3000:3000"
-
-x-worker: &worker
-  <<: *app
-  command: node src/worker.js
-
-x-postgres-env: &postgres-env
-  DB_PROVIDER: postgres
-  DATABASE_URL: postgres://wa_user:wa_password@postgres:5432/wa_loan_demo
-
-x-mongo-env: &mongo-env
-  DB_PROVIDER: mongo
-  MONGODB_URI: mongodb://mongo:27017
-  MONGODB_DB: wa_loan_demo
+  depends_on:
+    redis:
+      condition: service_healthy
 
 services:
-  api-postgres:
-    <<: *api
-    environment:
-      <<: *postgres-env
-    profiles:
-      - postgres
+  api:
+    <<: *app
+    command: node src/server.js
+    ports:
+      - "3000:3000"
     depends_on:
       postgres-migrate:
         condition: service_completed_successfully
-      rabbitmq:
+      redis:
         condition: service_healthy
 
-  worker-postgres:
-    <<: *worker
-    environment:
-      <<: *postgres-env
-    profiles:
-      - postgres
+  worker:
+    <<: *app
+    command: node src/worker.js
     depends_on:
       postgres-migrate:
         condition: service_completed_successfully
-      rabbitmq:
-        condition: service_healthy
-
-  api-mongo:
-    <<: *api
-    environment:
-      <<: *mongo-env
-    profiles:
-      - mongo
-    depends_on:
-      mongo:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  worker-mongo:
-    <<: *worker
-    environment:
-      <<: *mongo-env
-    profiles:
-      - mongo
-    depends_on:
-      mongo:
-        condition: service_healthy
-      rabbitmq:
+      redis:
         condition: service_healthy
 
   postgres-migrate:
@@ -77,10 +33,6 @@ services:
     command: node scripts/migrate-postgres.js
     env_file:
       - .env
-    environment:
-      <<: *postgres-env
-    profiles:
-      - postgres
     depends_on:
       postgres:
         condition: service_healthy
@@ -88,8 +40,6 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    profiles:
-      - postgres
     environment:
       POSTGRES_USER: wa_user
       POSTGRES_PASSWORD: wa_password
@@ -104,13 +54,14 @@ services:
       timeout: 5s
       retries: 5
 
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
+  redis:
+    image: redis:7-alpine
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -131,4 +82,5 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   mongo_data:

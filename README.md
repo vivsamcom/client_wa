@@ -1,34 +1,54 @@
 # Client WhatsApp Loan Demo
 
-Node.js reference backend for WhatsApp Business Platform loan/lending demos.
+Node.js 24 + Express reference backend for WhatsApp Business Platform loan/lending demos.
+
+## Standard Stack
+
+| Component | Local | Cloud / Demo |
+| --- | --- | --- |
+| Node.js API and worker | Docker Compose | Render |
+| HTTP framework | Express | Express |
+| Primary database | PostgreSQL container | Neon PostgreSQL |
+| Queue framework | BullMQ | BullMQ |
+| Queue backend | Redis container | Upstash Redis |
+| Optional document database | MongoDB container profile | MongoDB Atlas |
+| Local HTTPS tunnel | ngrok | Render HTTPS |
 
 ## What this demo does
 
-- Verifies Meta webhook using `VERIFY_TOKEN`.
-- Receives WhatsApp webhook events and immediately pushes them to RabbitMQ.
-- Worker consumes the queue and processes messages.
+- Verifies Meta webhook requests using `VERIFY_TOKEN`.
+- Receives WhatsApp webhook events and queues them with BullMQ.
+- Processes queued jobs in a Node.js worker.
 - Stores customers, inbound messages, language preference and loan leads.
-- Supports PostgreSQL or MongoDB via a repository wrapper.
+- Uses PostgreSQL by default, with optional MongoDB repository support.
 - Sends WhatsApp interactive language buttons and a basic loan menu.
-- Runs locally using Docker Compose and can be deployed as a Docker web service.
 
-## Local setup
+## Local Setup
 
-Default local setup uses PostgreSQL:
+Local development runs the app, PostgreSQL, Redis and the migration job with Docker Compose.
 
 ```bash
 cp .env.example .env
 # Update VERIFY_TOKEN, WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env
 
-docker compose --profile postgres up --build
+docker compose up --build
 ```
 
 Open:
 
 - API health: http://localhost:3000/health
-- RabbitMQ console: http://localhost:15672, user `guest`, password `guest`
+- PostgreSQL: `localhost:5432`
+- Redis: `localhost:6379`
 
-## Meta webhook callback URL
+MongoDB is optional:
+
+```bash
+docker compose --profile mongo up --build
+```
+
+PostgreSQL remains the default persistence provider. To use MongoDB, set `DB_PROVIDER=mongo` and `MONGODB_URI=mongodb://mongo:27017`.
+
+## Meta Webhook Callback URL
 
 For local testing, expose your local API:
 
@@ -44,39 +64,44 @@ https://<ngrok-subdomain>.ngrok-free.app/webhook
 
 Set the same verify token in Meta and in `.env`.
 
-## PostgreSQL migration
+## PostgreSQL Migration
 
-The default Compose stack runs PostgreSQL migration once in the `postgres-migrate` service before starting the API and worker. Manual run:
+Local Compose runs the PostgreSQL migration once before starting the API and worker. Manual local run:
 
 ```bash
 npm run db:migrate
 ```
 
-## Switching DB provider
-
-PostgreSQL profile:
+For cloud/demo environments, run the migration against Neon from a Render shell/job after setting `DATABASE_URL`:
 
 ```bash
-docker compose --profile postgres up --build
+npm run db:migrate
 ```
 
-MongoDB profile:
+## Cloud Development / Demo / POC
 
-```bash
-docker compose --profile mongo up --build
+Run only Node.js containers in cloud/demo environments. Use managed services for stateful infrastructure:
+
+- Node.js API and worker: Render
+- PostgreSQL: Neon
+- Queue backend: Upstash Redis
+- Optional MongoDB: MongoDB Atlas
+
+Use `.env.cloud.example` as the reference for platform environment variables:
+
+```env
+DATABASE_URL=postgresql://...neon...?sslmode=require
+QUEUE_URL=rediss://default:...@...upstash.io:...
+DB_PROVIDER=postgres
 ```
 
-The selected Compose profile sets the local `DB_PROVIDER` and container database URL automatically. Keep external/production database settings in environment variables outside Compose.
+The application also accepts `REDIS_URL` as a fallback for `QUEUE_URL`.
 
-MongoDB mode does not run the PostgreSQL migration or start PostgreSQL. PostgreSQL mode starts `postgres-migrate` once before the API and worker.
-
-Application code calls `conversation.repository.js`; individual adapters hide PostgreSQL/MongoDB differences.
-
-## Render Docker deployment
+## Render Deployment
 
 1. Push this repo to GitHub.
 2. Create a Render Web Service from the repo.
-3. Runtime: Docker.
+3. Runtime: Docker, using `./Dockerfile`.
 4. Set environment variables in Render dashboard, not inside Dockerfile.
 5. Health check path: `/health`.
 6. Create a separate Render Background Worker using the same repo and Docker image with start command:
@@ -85,4 +110,6 @@ Application code calls `conversation.repository.js`; individual adapters hide Po
 node src/worker.js
 ```
 
-Use managed PostgreSQL/RabbitMQ/MongoDB add-ons or external providers in production instead of Docker Compose stateful containers.
+7. Run the PostgreSQL migration once against Neon.
+
+Render should run only the Node.js API and worker containers. PostgreSQL, Redis and MongoDB should stay managed outside the Render container.

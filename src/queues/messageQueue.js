@@ -1,48 +1,66 @@
-const amqp = require('amqplib');
+const { Queue, Worker } = require('bullmq');
+const IORedis = require('ioredis');
 const env = require('../config/env');
 const logger = require('../config/logger');
 
-let channelPromise;
-
-async function getChannel() {
-  if (!channelPromise) {
-    channelPromise = amqp.connect(env.rabbitmqUrl)
-      .then(async (connection) => {
-        connection.on('error', (err) => logger.error({ err }, 'RabbitMQ connection error'));
-        connection.on('close', () => {
-          logger.warn('RabbitMQ connection closed; reconnect on next publish');
-          channelPromise = undefined;
-        });
-        const channel = await connection.createChannel();
-        await channel.assertQueue(env.rabbitmqQueue, { durable: true });
-        return channel;
-      });
-  }
-  return channelPromise;
+function createRedisConnection() {
+  return new IORedis(env.queueUrl, {
+    maxRetriesPerRequest: null
+  });
 }
 
+const queue = new Queue(env.queueName, {
+  connection: createRedisConnection(),
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: {
+      type: 'exponential',
+      delay: 1000
+    },
+    removeOnComplete: 1000,
+    removeOnFail: 5000
+  }
+});
+
+let worker;
+
 async function enqueueIncomingWebhook(payload) {
-  const channel = await getChannel();
-  const buffer = Buffer.from(JSON.stringify({ payload, receivedAt: new Date().toISOString() }));
-  channel.sendToQueue(env.rabbitmqQueue, buffer, { persistent: true, contentType: 'application/json' });
-  logger.info('Webhook event queued');
+  await queue.add('incoming-webhook', {
+    payload,
+    receivedAt: new Date().toISOString()
+  });
+  logger.info({ queue: env.queueName }, 'Webhook event queued');
 }
 
 async function consumeIncomingWebhooks(handler) {
-  const channel = await getChannel();
-  channel.prefetch(5);
-  await channel.consume(env.rabbitmqQueue, async (message) => {
-    if (!message) return;
-    try {
-      const data = JSON.parse(message.content.toString());
-      await handler(data);
-      channel.ack(message);
-    } catch (err) {
-      logger.error({ err }, 'Queue message processing failed');
-      channel.nack(message, false, false);
+  if (worker) return worker;
+
+  worker = new Worker(
+    env.queueName,
+    async (job) => {
+      await handler(job.data);
+    },
+    {
+      connection: createRedisConnection(),
+      concurrency: env.queueConcurrency
     }
+  );
+
+  worker.on('completed', (job) => {
+    logger.info({ jobId: job.id, queue: env.queueName }, 'Queue job completed');
   });
-  logger.info({ queue: env.rabbitmqQueue }, 'Worker consuming queue');
+
+  worker.on('failed', (job, err) => {
+    logger.error({ err, jobId: job?.id, queue: env.queueName }, 'Queue job processing failed');
+  });
+
+  worker.on('error', (err) => {
+    logger.error({ err, queue: env.queueName }, 'BullMQ worker error');
+  });
+
+  await worker.waitUntilReady();
+  logger.info({ queue: env.queueName, concurrency: env.queueConcurrency }, 'Worker consuming queue');
+  return worker;
 }
 
 module.exports = { enqueueIncomingWebhook, consumeIncomingWebhooks };
