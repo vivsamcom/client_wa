@@ -1,115 +1,123 @@
-# Client WhatsApp Loan Demo
+# Client WhatsApp Loan Flow
 
-Node.js 24 + Express reference backend for WhatsApp Business Platform loan/lending demos.
+Node.js + Express WhatsApp Business Platform webhook for a client-specific loan flow.
 
-## Standard Stack
+The reusable platform code lives under `src/platform`. The current client flow lives under `src/business-flow`. For another client, copy this repo and replace only `src/business-flow` with the new travel, hospital, insurance, or other flow.
 
-| Component | Local | Cloud / Demo |
-| --- | --- | --- |
-| Node.js API and worker | Docker Compose | Render |
-| HTTP framework | Express | Express |
-| Primary database | PostgreSQL container | Neon PostgreSQL |
-| Queue framework | BullMQ | BullMQ |
-| Queue backend | Redis container | Upstash Redis |
-| Optional document database | MongoDB container profile | MongoDB Atlas |
-| Local HTTPS tunnel | ngrok | Render HTTPS |
+## Runtime Shape
 
-## What this demo does
+- Webhook app verifies Meta webhook requests.
+- Webhook POST receives Meta payloads, publishes them to the incoming queue, and returns `200` immediately.
+- Worker consumes queue messages, extracts WhatsApp message context, and calls:
 
-- Verifies Meta webhook requests using `VERIFY_TOKEN`.
-- Receives WhatsApp webhook events and queues them with BullMQ.
-- Processes queued jobs in a Node.js worker.
-- Stores customers, inbound messages, language preference and loan leads.
-- Uses PostgreSQL by default, with optional MongoDB repository support.
-- Sends WhatsApp interactive language buttons and a basic loan menu.
+```js
+const businessFlow = require('./business-flow');
+await businessFlow.handleIncomingMessage(messageContext);
+```
 
-## Local Setup
+There is no `BUSINESS_FLOW` environment selection in this repo. It uses the loan flow only.
 
-Local development runs the app, PostgreSQL, Redis and the migration job with Docker Compose.
+## Local Docker Setup
+
+Copy the local env template:
 
 ```bash
 cp .env.example .env
-# Update VERIFY_TOKEN, WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env
+```
 
+Set your Meta values in `.env`:
+
+```env
+META_VERIFY_TOKEN=
+META_ACCESS_TOKEN=
+META_PHONE_NUMBER_ID=
+META_API_VERSION=v23.0
+```
+
+Start the local stack:
+
+```bash
 docker compose up --build
 ```
 
-Open:
+Services:
 
-- API health: http://localhost:3000/health
+- App: http://localhost:3000
+- Health: http://localhost:3000/health
 - PostgreSQL: `localhost:5432`
-- Redis: `localhost:6379`
+- LavinMQ AMQP: `localhost:5672`
+- LavinMQ UI: http://localhost:15672
 
-MongoDB is optional:
+Run the PostgreSQL migration once:
 
 ```bash
-docker compose --profile mongo up --build
+docker compose run --rm app npm run db:migrate
 ```
 
-PostgreSQL remains the default persistence provider. To use MongoDB, set `DB_PROVIDER=mongo` and `MONGODB_URI=mongodb://mongo:27017`.
+## Environment Variables
 
-## Meta Webhook Callback URL
+```env
+NODE_ENV=development
+PORT=3000
 
-For local testing, expose your local API:
+META_VERIFY_TOKEN=
+META_ACCESS_TOKEN=
+META_PHONE_NUMBER_ID=
+META_API_VERSION=v23.0
+
+DB_PROVIDER=postgres
+DB_URI=postgresql://postgres:postgres@postgres:5432/client_wa
+
+QUEUE_PROVIDER=lavinmq
+QUEUE_URI=amqp://guest:guest@lavinmq:5672
+WHATSAPP_INCOMING_QUEUE=wa.incoming.messages
+```
+
+Supported queue providers:
+
+- `lavinmq`
+- `rabbitmq`
+- `bullmq`
+
+Supported DB providers:
+
+- `postgres`
+- `mongo`
+
+Business-flow code imports generic repositories and does not import `pg`, `mongodb`, BullMQ, or AMQP libraries directly.
+
+## Meta Webhook Callback
+
+Expose the app with a tunnel for local testing:
 
 ```bash
 ngrok http 3000
 ```
 
-Use the HTTPS forwarding URL in Meta Developer Portal:
+Use this callback URL in the Meta Developer Portal:
 
 ```text
 https://<ngrok-subdomain>.ngrok-free.app/webhook
 ```
 
-Set the same verify token in Meta and in `.env`.
-
-## PostgreSQL Migration
-
-Local Compose runs the PostgreSQL migration once before starting the API and worker. Manual local run:
-
-```bash
-npm run db:migrate
-```
-
-For cloud/demo environments, run the migration against Neon from a Render shell/job after setting `DATABASE_URL`:
-
-```bash
-npm run db:migrate
-```
-
-## Cloud Development / Demo / POC
-
-Run only Node.js containers in cloud/demo environments. Use managed services for stateful infrastructure:
-
-- Node.js API and worker: Render
-- PostgreSQL: Neon
-- Queue backend: Upstash Redis
-- Optional MongoDB: MongoDB Atlas
-
-Use `.env.cloud.example` as the reference for platform environment variables:
-
-```env
-DATABASE_URL=postgresql://...neon...?sslmode=require
-QUEUE_URL=rediss://default:...@...upstash.io:...
-DB_PROVIDER=postgres
-```
-
-The application also accepts `REDIS_URL` as a fallback for `QUEUE_URL`.
+Set the same `META_VERIFY_TOKEN` in Meta and `.env`.
 
 ## Render Deployment
 
-1. Push this repo to GitHub.
-2. Create a Render Web Service from the repo.
-3. Runtime: Docker, using `./Dockerfile`.
-4. Set environment variables in Render dashboard, not inside Dockerfile.
-5. Health check path: `/health`.
-6. Create a separate Render Background Worker using the same repo and Docker image with start command:
+Render should run only Node.js processes. Use managed services for state:
+
+- Supabase PostgreSQL via `DB_URI`
+- CloudAMQP/LavinMQ via `QUEUE_URI`
+
+Create two Render services from the same repo:
+
+- Web Service command: `npm start`
+- Background Worker command: `npm run worker`
+
+Set environment variables in the Render dashboard. Do not run PostgreSQL or LavinMQ inside Render services.
+
+Run the migration once against Supabase with `DB_PROVIDER=postgres` and `DB_URI` set:
 
 ```bash
-node src/worker.js
+npm run db:migrate
 ```
-
-7. Run the PostgreSQL migration once against Neon.
-
-Render should run only the Node.js API and worker containers. PostgreSQL, Redis and MongoDB should stay managed outside the Render container.

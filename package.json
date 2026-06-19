@@ -1,7 +1,7 @@
 {
-  "name": "client-wa-loan-demo",
+  "name": "client-wa",
   "version": "1.0.0",
-  "description": "WhatsApp Business Platform loan processing demo with Node.js, Express, BullMQ, Redis, PostgreSQL and optional MongoDB",
+  "description": "WhatsApp Business Platform webhook platform with a replaceable client business flow",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -10,11 +10,11 @@
     "dev:worker": "nodemon src/worker.js",
     "db:migrate": "node scripts/migrate-postgres.js",
     "docker:up": "docker compose up --build",
-    "docker:up:mongo": "docker compose --profile mongo up --build",
     "docker:down": "docker compose down -v"
   },
   "engines": { "node": ">=24" },
   "dependencies": {
+    "amqplib": "^0.10.4",
     "axios": "^1.7.9",
     "bullmq": "^5.58.7",
     "cors": "^2.8.5",

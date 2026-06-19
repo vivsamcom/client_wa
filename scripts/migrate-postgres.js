@@ -8,7 +8,9 @@ if (dbProvider !== 'postgres') {
   process.exit(0);
 }
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL || 'postgres://wa_user:wa_password@localhost:5432/wa_loan_demo' });
+const pool = new Pool({
+  connectionString: process.env.DB_URI || process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/client_wa'
+});
 
 const sql = `
 create table if not exists customers (
@@ -34,15 +36,6 @@ create table if not exists inbound_messages (
   action_id text,
   raw_payload jsonb not null,
   created_at timestamptz not null default now()
-);
-
-create table if not exists loan_leads (
-  id bigserial primary key,
-  wa_id varchar(32) not null references customers(wa_id),
-  loan_type varchar(100) not null,
-  stage varchar(50) not null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
 );
 `;
 

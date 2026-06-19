@@ -2,37 +2,40 @@ x-app: &app
   build: .
   env_file:
     - .env
+  environment:
+    DB_PROVIDER: ${DB_PROVIDER:-postgres}
+    DB_URI: ${DB_URI:-postgresql://postgres:postgres@postgres:5432/client_wa}
+    QUEUE_PROVIDER: ${QUEUE_PROVIDER:-lavinmq}
+    QUEUE_URI: ${QUEUE_URI:-amqp://guest:guest@lavinmq:5672}
+    WHATSAPP_INCOMING_QUEUE: ${WHATSAPP_INCOMING_QUEUE:-wa.incoming.messages}
   restart: unless-stopped
   depends_on:
-    redis:
+    postgres:
+      condition: service_healthy
+    lavinmq:
       condition: service_healthy
 
 services:
-  api:
+  app:
     <<: *app
     command: node src/server.js
     ports:
       - "3000:3000"
-    depends_on:
-      postgres-migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
 
   worker:
     <<: *app
     command: node src/worker.js
-    depends_on:
-      postgres-migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
 
   postgres-migrate:
     build: .
     command: node scripts/migrate-postgres.js
+    profiles:
+      - migrate
     env_file:
       - .env
+    environment:
+      DB_PROVIDER: ${DB_PROVIDER:-postgres}
+      DB_URI: ${DB_URI:-postgresql://postgres:postgres@postgres:5432/client_wa}
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,46 +44,29 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: wa_user
-      POSTGRES_PASSWORD: wa_password
-      POSTGRES_DB: wa_loan_demo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: client_wa
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U wa_user -d wa_loan_demo"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d client_wa"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
+  lavinmq:
+    image: cloudamqp/lavinmq:latest
     ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+      - "5672:5672"
+      - "15672:15672"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  mongo:
-    image: mongo:7
-    profiles:
-      - mongo
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      test: ["CMD-SHELL", "lavinmqctl status >/dev/null 2>&1"]
       interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
   postgres_data:
-  redis_data:
-  mongo_data:

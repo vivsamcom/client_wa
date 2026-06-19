@@ -2,8 +2,8 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const pinoHttp = require('pino-http');
-const logger = require('./config/logger');
-const webhookRoutes = require('./routes/webhook.routes');
+const logger = require('./platform/config/logger');
+const webhookRoutes = require('./platform/meta/webhook.routes');
 const healthRoutes = require('./routes/health.routes');
 
 function createApp() {

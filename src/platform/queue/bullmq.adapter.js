@@ -4,12 +4,12 @@ const env = require('../config/env');
 const logger = require('../config/logger');
 
 function createRedisConnection() {
-  return new IORedis(env.queueUrl, {
+  return new IORedis(env.queueUri, {
     maxRetriesPerRequest: null
   });
 }
 
-const queue = new Queue(env.queueName, {
+const queue = new Queue(env.whatsappIncomingQueue, {
   connection: createRedisConnection(),
   defaultJobOptions: {
     attempts: 3,
@@ -24,19 +24,16 @@ const queue = new Queue(env.queueName, {
 
 let worker;
 
-async function enqueueIncomingWebhook(payload) {
-  await queue.add('incoming-webhook', {
-    payload,
-    receivedAt: new Date().toISOString()
-  });
-  logger.info({ queue: env.queueName }, 'Webhook event queued');
+async function publish(data) {
+  await queue.add('incoming-webhook', data);
+  logger.info({ queue: env.whatsappIncomingQueue }, 'Webhook event queued');
 }
 
-async function consumeIncomingWebhooks(handler) {
+async function consume(handler) {
   if (worker) return worker;
 
   worker = new Worker(
-    env.queueName,
+    env.whatsappIncomingQueue,
     async (job) => {
       await handler(job.data);
     },
@@ -47,20 +44,20 @@ async function consumeIncomingWebhooks(handler) {
   );
 
   worker.on('completed', (job) => {
-    logger.info({ jobId: job.id, queue: env.queueName }, 'Queue job completed');
+    logger.info({ jobId: job.id, queue: env.whatsappIncomingQueue }, 'Queue job completed');
   });
 
   worker.on('failed', (job, err) => {
-    logger.error({ err, jobId: job?.id, queue: env.queueName }, 'Queue job processing failed');
+    logger.error({ err, jobId: job?.id, queue: env.whatsappIncomingQueue }, 'Queue job processing failed');
   });
 
   worker.on('error', (err) => {
-    logger.error({ err, queue: env.queueName }, 'BullMQ worker error');
+    logger.error({ err, queue: env.whatsappIncomingQueue }, 'BullMQ worker error');
   });
 
   await worker.waitUntilReady();
-  logger.info({ queue: env.queueName, concurrency: env.queueConcurrency }, 'Worker consuming queue');
+  logger.info({ queue: env.whatsappIncomingQueue, concurrency: env.queueConcurrency }, 'Worker consuming queue');
   return worker;
 }
 
-module.exports = { enqueueIncomingWebhook, consumeIncomingWebhooks };
+module.exports = { publish, consume };
