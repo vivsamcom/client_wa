@@ -10,9 +10,12 @@
     "dev:worker": "nodemon src/worker.js",
     "db:migrate": "node scripts/migrate-postgres.js",
     "docker:up": "docker compose up --build",
-    "docker:down": "docker compose down -v"
+    "docker:down": "docker compose down -v",
+    "render:free": "node src/render-free.js"
   },
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "dependencies": {
     "amqplib": "^0.10.4",
     "axios": "^1.7.9",
